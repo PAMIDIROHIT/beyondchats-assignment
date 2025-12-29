@@ -1,0 +1,38 @@
+{
+  "name": "beyondchats-backend",
+  "version": "1.0.0",
+  "description": "Backend for BeyondChats Article Management and Optimization",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "scrape": "node src/services/scraper.js",
+    "update": "node src/scripts/updateArticles.js"
+  },
+  "keywords": [
+    "web-scraping",
+    "llm",
+    "content-optimization",
+    "express",
+    "mongodb"
+  ],
+  "author": "PAMIDI ROHIT",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^8.0.3",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "puppeteer": "^21.6.1",
+    "cheerio": "^1.0.0-rc.12",
+    "axios": "^1.6.2",
+    "@google/generative-ai": "^0.1.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
