@@ -1,6 +1,6 @@
 /**
  * Google Search Service - Phase 2
- * Uses SerpAPI to search article titles and extract blog/article URLs
+ * Uses ScraperAPI to search Google for article titles and extract blog/article URLs
  */
 
 import axios from 'axios';
@@ -8,11 +8,81 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const SERP_API_KEY = process.env.SERP_API_KEY;
-const SERP_API_URL = 'https://serpapi.com/search';
+const SCRAPER_API_KEY = process.env.SERP_API_KEY; // Using same env var name for compatibility
+const SCRAPER_API_URL = 'https://api.scraperapi.com';
 
 /**
- * Search Google for article title and get top blog/article URLs
+ * Parse HTML to extract search results
+ * @param {string} html - HTML content
+ * @returns {Array} Array of search results
+ */
+function parseGoogleResults(html) {
+    const results = [];
+
+    // Simple regex-based extraction
+    // Match anchor tags with href
+    const linkRegex = /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([^<]*(?:<[^a]*[^>]*>[^<]*)*)<\/a>/gi;
+    const h3Regex = /<h3[^>]*>([^<]+)<\/h3>/gi;
+
+    // Extract all URLs from the page
+    const urlMatches = html.matchAll(/<a[^>]+href="(https?:\/\/(?!www\.google)[^"]+)"[^>]*>/gi);
+    const h3Matches = [...html.matchAll(/<h3[^>]*>([^<]+)<\/h3>/gi)];
+
+    let h3Index = 0;
+    for (const match of urlMatches) {
+        const url = match[1];
+
+        // Skip Google, YouTube, and other unwanted domains
+        const excludeDomains = [
+            'google.com', 'google.co', 'gstatic.com', 'googleapis.com',
+            'youtube.com', 'facebook.com', 'twitter.com', 'instagram.com',
+            'pinterest.com', 'reddit.com', 'wikipedia.org'
+        ];
+
+        const isExcluded = excludeDomains.some(domain => url.includes(domain));
+        if (isExcluded) continue;
+
+        // Get title from nearby h3 if available
+        const title = h3Matches[h3Index] ? h3Matches[h3Index][1] : extractTitleFromUrl(url);
+        h3Index++;
+
+        if (url && !results.some(r => r.url === url)) {
+            results.push({
+                url,
+                title: title || extractTitleFromUrl(url),
+                snippet: ''
+            });
+        }
+
+        if (results.length >= 10) break;
+    }
+
+    return results;
+}
+
+/**
+ * Extract a readable title from URL
+ * @param {string} url - URL string
+ * @returns {string} Title
+ */
+function extractTitleFromUrl(url) {
+    try {
+        const path = new URL(url).pathname;
+        const segments = path.split('/').filter(s => s.length > 0);
+        const lastSegment = segments[segments.length - 1] || '';
+        return lastSegment
+            .replace(/[-_]/g, ' ')
+            .replace(/\.\w+$/, '')
+            .split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ') || url;
+    } catch {
+        return url;
+    }
+}
+
+/**
+ * Search Google using ScraperAPI and get top blog/article URLs
  * @param {string} query - Article title to search
  * @param {number} numResults - Number of results to return (default: 2)
  * @returns {Promise<Array>} Array of URLs
@@ -21,79 +91,35 @@ export async function searchGoogle(query, numResults = 2) {
     try {
         console.log(`🔍 Searching Google for: "${query}"`);
 
-        if (!SERP_API_KEY) {
-            throw new Error('SERP_API_KEY is not configured');
+        if (!SCRAPER_API_KEY) {
+            throw new Error('SCRAPER_API_KEY is not configured');
         }
 
-        // SerpAPI request parameters
-        const params = {
-            api_key: SERP_API_KEY,
-            q: query,
-            engine: 'google',
-            num: 10, // Get more results to filter from
-            hl: 'en',
-            gl: 'us'
-        };
+        // Build Google search URL
+        const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`;
 
-        const response = await axios.get(SERP_API_URL, { params });
+        // ScraperAPI request
+        const response = await axios.get(SCRAPER_API_URL, {
+            params: {
+                api_key: SCRAPER_API_KEY,
+                url: googleSearchUrl,
+                render: false
+            },
+            timeout: 60000
+        });
 
-        if (!response.data || !response.data.organic_results) {
-            console.log('⚠️  No organic results found');
+        if (!response.data) {
+            console.log('⚠️  No response from ScraperAPI');
             return [];
         }
 
-        const organicResults = response.data.organic_results;
-        console.log(`📊 Found ${organicResults.length} organic results`);
+        // Parse HTML response
+        const results = parseGoogleResults(response.data);
 
-        // Filter for blog/article URLs
-        const blogUrls = organicResults
-            .filter(result => {
-                const url = result.link || '';
-                const title = (result.title || '').toLowerCase();
-                const snippet = (result.snippet || '').toLowerCase();
+        console.log(`📊 Found ${results.length} search results`);
 
-                // Exclude certain domains
-                const excludeDomains = [
-                    'youtube.com',
-                    'facebook.com',
-                    'twitter.com',
-                    'instagram.com',
-                    'linkedin.com',
-                    'pinterest.com',
-                    'reddit.com',
-                    'quora.com',
-                    'stackoverflow.com',
-                    'github.com',
-                    'wikipedia.org'
-                ];
-
-                const isExcluded = excludeDomains.some(domain => url.includes(domain));
-                if (isExcluded) return false;
-
-                // Prefer URLs that look like blog/article pages
-                const blogIndicators = [
-                    '/blog/',
-                    '/article/',
-                    '/post/',
-                    '/news/',
-                    '/guide/',
-                    '/tutorial/',
-                    'blog',
-                    'article'
-                ];
-
-                const hasBlogIndicator = blogIndicators.some(indicator =>
-                    url.includes(indicator) || title.includes(indicator) || snippet.includes(indicator)
-                );
-
-                return hasBlogIndicator || true; // Include all if no strong indicators
-            })
-            .slice(0, numResults)
-            .map(result => ({
-                title: result.title,
-                url: result.link,
-                snippet: result.snippet
-            }));
+        // Filter and limit results
+        const blogUrls = results.slice(0, numResults);
 
         console.log(`✅ Extracted ${blogUrls.length} blog/article URLs`);
 
@@ -109,12 +135,12 @@ export async function searchGoogle(query, numResults = 2) {
 
         // Check for specific error types
         if (error.response) {
-            console.error('API Response Error:', error.response.data);
+            console.error('API Response Error:', error.response.status, error.response.statusText);
 
-            if (error.response.status === 401) {
-                throw new Error('Invalid SerpAPI key');
+            if (error.response.status === 401 || error.response.status === 403) {
+                throw new Error('Invalid ScraperAPI key');
             } else if (error.response.status === 429) {
-                throw new Error('SerpAPI rate limit exceeded');
+                throw new Error('ScraperAPI rate limit exceeded');
             }
         }
 
